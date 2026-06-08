@@ -1,6 +1,6 @@
 # Novel Writer 小说创作插件
 
-Novel Writer 会在用户要求 Bot 写小说、写故事、续写剧情或根据人设创作文艺内容时，调用框架 LLM 生成小说正文，并通过 `forward_msg` 插件发送为合并转发消息。
+Novel Writer 会在用户要求 Bot 写小说、写故事、续写剧情或根据人设创作文艺内容时，调用框架 LLM 生成小说正文。若安装并启用可选插件 `forward_msg`，会优先通过合并转发消息发送；否则可按配置直接发送正文。
 
 ## 功能
 
@@ -8,10 +8,10 @@ Novel Writer 会在用户要求 Bot 写小说、写故事、续写剧情或根�
 - 默认使用框架 `model_tasks.actor` 模型任务。
 - 可在插件配置中指定 `config/model.toml` 里的模型名称。
 - 支持配置温度、最大输出 token、默认最低字数、最低段落数。
-- 自动把长篇正文拆分为多个合并转发节点发送。
+- 可选配合 `forward_msg` 把长篇正文拆分为多个合并转发节点发送。
 - 可通过配置开关完全禁用 `write_novel` Action。
 
-## 依赖
+## 可选功能：合并转发
 
 需要启用 `forward_msg` 插件，并提供以下 Service，才能优先通过合并转发发送小说：
 
@@ -21,7 +21,7 @@ forward_msg:service:forward_msg_protocol
 
 `forward_msg` 插件市场地址：<http://39.96.71.162/plugin/forward_msg>
 
-`forward_msg` 是推荐依赖，不再强制阻塞插件加载。如果未安装、未启用或发送失败，且 `fallback_to_direct_send = true`，插件会先提醒用户“小说内容过多可能导致刷屏”，然后把小说正文拆成多条普通消息直接发送。
+`forward_msg` 是可选功能插件，不再作为强依赖阻塞 `novel_writer` 加载。如果未安装、未启用或发送失败，且 `fallback_to_direct_send = true`，插件会先提醒用户“小说内容过多可能导致刷屏”，然后把小说正文拆成多条普通消息直接发送。
 
 ## 触发方式
 
@@ -83,6 +83,6 @@ config/plugins/novel_writer/config.toml
 
 ## 注意事项
 
-- 本插件不直接发送普通文本消息，小说正文通过 `forward_msg` 合并转发发送。
+- `forward_msg` 是可选功能插件；安装后优先使用合并转发，未安装时可按配置直接发送正文。
 - 如果生成或发送失败，错误会记录到 `novel_writer.action` 日志。
 - 如果 LLM 请求长时间无响应，会在 120 秒后返回超时失败。

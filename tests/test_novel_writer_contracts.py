@@ -53,7 +53,8 @@ def test_manifest_matches_plugin_contract() -> None:
     assert manifest["version"] == NovelWriterPlugin.plugin_version
     assert include_names <= component_names
     assert "novel_generation" in component_names
-    assert "forward_msg" in manifest["dependencies"]["plugins"]
+    assert manifest["dependencies"]["plugins"] == []
+    assert manifest["dependencies"]["components"] == []
     assert manifest["dependencies_required"] is False
     assert manifest["include"][0]["dependencies"] == []
 

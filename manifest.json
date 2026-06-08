@@ -16,12 +16,8 @@
         "forward-message"
     ],
     "dependencies": {
-        "plugins": [
-            "forward_msg"
-        ],
-        "components": [
-            "forward_msg:service:forward_msg_protocol"
-        ]
+        "plugins": [],
+        "components": []
     },
     "license": "GPL-3.0",
     "python_dependencies": [],

@@ -1,8 +1,8 @@
 # 使用方法
 
-## 启用条件
+## 可选功能：合并转发
 
-Novel Writer 推荐配合 `forward_msg` 插件使用。请确保运行环境中已启用 `forward_msg`，并能提供：
+Novel Writer 可选配合 `forward_msg` 插件使用。安装并启用后，插件会优先通过合并转发发送小说正文，并需要运行环境提供：
 
 ```text
 forward_msg:service:forward_msg_protocol
@@ -10,7 +10,7 @@ forward_msg:service:forward_msg_protocol
 
 `forward_msg` 插件市场地址：<http://39.96.71.162/plugin/forward_msg>
 
-`forward_msg` 是推荐依赖，不再强制阻塞插件加载。如果未安装、未启用或发送失败，且 `fallback_to_direct_send = true`，插件会先提醒用户“小说内容过多可能导致刷屏”，然后把小说正文拆成多条普通消息直接发送。
+`forward_msg` 是可选功能插件，不再作为强依赖阻塞插件加载。如果未安装、未启用或发送失败，且 `fallback_to_direct_send = true`，插件会先提醒用户“小说内容过多可能导致刷屏”，然后把小说正文拆成多条普通消息直接发送。
 
 ## 基本使用
 
@@ -46,7 +46,7 @@ config/plugins/novel_writer/config.toml
 
 ## 输出方式
 
-小说正文会拆分为多个 `forward_msg` 合并转发节点发送，不会由插件单独实现新的平台发送逻辑。
+小说正文会优先拆分为多个 `forward_msg` 合并转发节点发送；如果 `forward_msg` 不可用且启用直发兜底，则会改为拆分成多条普通消息发送。
 
 ## 排错
 
