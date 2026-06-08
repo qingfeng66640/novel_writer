@@ -14,10 +14,9 @@ class NovelWriterPlugin(BasePlugin):
 
     plugin_name = "novel_writer"
     plugin_description = "根据 Bot 人设与背景自动创作小说，并通过合并转发消息发送。（我去了我蝶终于能写小说了😭😭😭）"
-    plugin_version = "1.0.0"
+    plugin_version = "1.0.1"
 
     configs = [NovelWriterConfig]
-    dependent_components = ["forward_msg:service:forward_msg_protocol"]
 
     def get_components(self) -> list[type]:
         """返回插件组件类。"""

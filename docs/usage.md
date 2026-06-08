@@ -2,11 +2,15 @@
 
 ## 启用条件
 
-Novel Writer 依赖 `forward_msg` 插件。请确保运行环境中已启用 `forward_msg`，并能提供：
+Novel Writer 推荐配合 `forward_msg` 插件使用。请确保运行环境中已启用 `forward_msg`，并能提供：
 
 ```text
 forward_msg:service:forward_msg_protocol
 ```
+
+`forward_msg` 插件市场地址：<http://39.96.71.162/plugin/forward_msg>
+
+`forward_msg` 是推荐依赖，不再强制阻塞插件加载。如果未安装、未启用或发送失败，且 `fallback_to_direct_send = true`，插件会先提醒用户“小说内容过多可能导致刷屏”，然后把小说正文拆成多条普通消息直接发送。
 
 ## 基本使用
 
@@ -34,6 +38,7 @@ config/plugins/novel_writer/config.toml
 - `max_tokens`：最大输出 token 数。
 - `min_words`：默认最低字数要求。
 - `min_paragraphs`：默认最低段落数要求。
+- `fallback_to_direct_send`：当 `forward_msg` 不可用或发送失败时是否改为直接发送正文；会先提醒刷屏风险。
 - `max_words_per_message`：合并转发中单条 node 的最大文本长度。
 
 ## 输出方式

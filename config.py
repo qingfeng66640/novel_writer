@@ -44,6 +44,13 @@ class NovelWriterConfig(BaseConfig):
             default=8,
             description="默认要求小说正文至少包含的自然段数量；用于避免模型只输出一句话。",
         )
+        fallback_to_direct_send: bool = Field(
+            default=True,
+            description=(
+                "当未检测到 forward_msg 依赖或合并转发发送失败时，是否直接发送小说正文；"
+                "启用后会先提醒用户，小说内容过多可能导致刷屏。"
+            ),
+        )
         max_words_per_message: int = Field(
             default=500,
             description="合并转发单个 node 节点的最大文本长度，小说会按该值拆分为多条聊天记录。",

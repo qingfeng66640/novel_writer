@@ -26,7 +26,7 @@ class WriteNovelAction(BaseAction):
         "生成小说，并打包成合并转发聊天记录发送到当前聊天流。"
     )
     primary_action = False
-    dependencies = ["forward_msg:service:forward_msg_protocol"]
+    dependencies = []
 
     async def execute(
         self,
@@ -63,12 +63,18 @@ class WriteNovelAction(BaseAction):
         service = service_api.get_service("forward_msg:service:forward_msg_protocol")
         if service is None or not hasattr(service, "send_forward_message"):
             logger.warning("forward_msg 服务不可用")
-            return False, "forward_msg 服务不可用"
+            return await self._handle_forward_failure(
+                novel,
+                config,
+                "forward_msg 服务不可用",
+            )
 
         result = await service.send_forward_message(nodes, self.chat_stream.stream_id)
         ok, message = result if isinstance(result, tuple) else (False, "forward_msg 返回值异常")
         logger.info(f"forward_msg 发送结果: ok={ok}, message={message}")
-        return bool(ok), str(message)
+        if not ok:
+            return await self._handle_forward_failure(novel, config, str(message))
+        return True, str(message)
 
     def _config(self) -> NovelWriterConfig:
         """获取插件配置。"""
@@ -177,6 +183,33 @@ class WriteNovelAction(BaseAction):
         if recent_content:
             lines.append(f"最近聊天上下文：\n{recent_content}")
         return "\n".join(lines)
+
+    async def _handle_forward_failure(
+        self,
+        novel: str,
+        config: NovelWriterConfig,
+        reason: str,
+    ) -> tuple[bool, str]:
+        """处理合并转发失败后的直发兜底。"""
+
+        if not config.writer.fallback_to_direct_send:
+            return False, reason
+
+        chunks = self._split_text(novel, config.writer.max_words_per_message)
+        warning = (
+            "forward_msg 依赖不可用或发送失败，已改为直接发送小说正文；"
+            "小说内容过多时可能导致刷屏。"
+        )
+        if not await self._send_to_stream(warning):
+            return False, f"{reason}；直发提醒发送失败"
+
+        sent_count = 0
+        for chunk in chunks:
+            if await self._send_to_stream(chunk):
+                sent_count += 1
+        if sent_count != len(chunks):
+            return False, f"{reason}；直发完成 {sent_count}/{len(chunks)} 条"
+        return True, f"{reason}；已直发小说正文 {sent_count} 条"
 
     def _build_forward_nodes(
         self,

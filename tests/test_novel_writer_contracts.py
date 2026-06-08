@@ -44,6 +44,8 @@ def test_manifest_matches_plugin_contract() -> None:
     assert manifest["version"] == NovelWriterPlugin.plugin_version
     assert include_names <= component_names
     assert "forward_msg" in manifest["dependencies"]["plugins"]
+    assert manifest["dependencies_required"] is False
+    assert manifest["include"][0]["dependencies"] == []
 
 
 def test_config_defaults_use_actor_task() -> None:
@@ -55,7 +57,7 @@ def test_config_defaults_use_actor_task() -> None:
     assert config.writer.temperature == 0.9
     assert config.writer.max_tokens == 3000
     assert config.writer.min_words == 1200
-    assert config.writer.min_paragraphs == 8
+    assert config.writer.fallback_to_direct_send is True
     assert config.writer.max_words_per_message == 500
     assert "{bot_persona}" in config.writer.novel_prompt_template
     assert "{user_request}" in config.writer.novel_prompt_template
@@ -73,7 +75,8 @@ def test_config_field_descriptions_explain_placeholders() -> None:
     assert "max_tokens" in fields["max_tokens"].description
     assert "只输出很短内容" in fields["max_tokens"].description
     assert "至少达到" in fields["min_words"].description
-    assert "避免模型只输出一句话" in fields["min_paragraphs"].description
+    assert "未检测到 forward_msg" in fields["fallback_to_direct_send"].description
+    assert "刷屏" in fields["fallback_to_direct_send"].description
     assert "node 节点" in fields["max_words_per_message"].description
     assert "{background_story}" in fields["background_prompt_template"].description
     assert "personality.background_story" in fields["background_prompt_template"].description
@@ -152,6 +155,40 @@ def test_build_forward_nodes_uses_bot_identity() -> None:
     assert nodes[0]["data"]["user_id"] == "10000"
     assert nodes[0]["data"]["nickname"] == "小狐狸"
     assert nodes[0]["data"]["content"][0]["data"]["text"] == "第一段"
+
+
+def test_direct_send_fallback_warns_before_sending(monkeypatch: Any) -> None:
+    """合并转发不可用时按配置先提醒刷屏风险再直发正文。"""
+
+    sent_messages: list[str] = []
+    action = _make_action()
+
+    async def fake_send_to_stream(content: str) -> bool:
+        sent_messages.append(content)
+        return True
+
+    monkeypatch.setattr(action, "_send_to_stream", fake_send_to_stream)
+    config = NovelWriterConfig()
+    config.writer.max_words_per_message = 3
+    result = __import__("asyncio").run(
+        action._handle_forward_failure("第一段\n\n第二段", config, "forward_msg 服务不可用")
+    )
+    assert result == (True, "forward_msg 服务不可用；已直发小说正文 2 条")
+    assert "可能导致刷屏" in sent_messages[0]
+    assert sent_messages[1:] == ["第一段", "第二段"]
+
+
+def test_direct_send_fallback_can_be_disabled() -> None:
+    """关闭直发兜底时保留合并转发失败结果。"""
+
+    config = NovelWriterConfig()
+    config.writer.fallback_to_direct_send = False
+    action = _make_action(config)
+    result = __import__("asyncio").run(
+        action._handle_forward_failure("正文", config, "forward_msg 服务不可用")
+    )
+    assert result == (False, "forward_msg 服务不可用")
+
 
 
 def test_get_model_set_uses_actor_task_by_default(monkeypatch: Any) -> None:

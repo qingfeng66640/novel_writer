@@ -13,11 +13,15 @@ Novel Writer 会在用户要求 Bot 写小说、写故事、续写剧情或根�
 
 ## 依赖
 
-需要启用 `forward_msg` 插件，并提供以下 Service：
+需要启用 `forward_msg` 插件，并提供以下 Service，才能优先通过合并转发发送小说：
 
 ```text
 forward_msg:service:forward_msg_protocol
 ```
+
+`forward_msg` 插件市场地址：<http://39.96.71.162/plugin/forward_msg>
+
+`forward_msg` 是推荐依赖，不再强制阻塞插件加载。如果未安装、未启用或发送失败，且 `fallback_to_direct_send = true`，插件会先提醒用户“小说内容过多可能导致刷屏”，然后把小说正文拆成多条普通消息直接发送。
 
 ## 触发方式
 
@@ -54,6 +58,7 @@ config/plugins/novel_writer/config.toml
 | `max_tokens` | 最大输出 token 数；过小会导致正文很短。 |
 | `min_words` | 默认最低中文字数要求。 |
 | `min_paragraphs` | 默认最低自然段数量要求。 |
+| `fallback_to_direct_send` | 当 `forward_msg` 不可用或发送失败时是否改为直接发送正文；会先提醒刷屏风险。 |
 | `max_words_per_message` | 合并转发单个 node 节点最大文本长度。 |
 | `background_prompt_template` | 背景知识提示词模板。 |
 | `novel_prompt_template` | 小说主提示词模板。 |
