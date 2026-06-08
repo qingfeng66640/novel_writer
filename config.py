@@ -19,7 +19,11 @@ class NovelWriterConfig(BaseConfig):
 
         enabled: bool = Field(
             default=True,
-            description="是否启用小说创作插件；false 时插件不注册 write_novel Action，不会响应写小说请求。",
+            description="是否启用小说创作插件；false 时插件不注册生成 Service 与 write_novel Action。",
+        )
+        action_enabled: bool = Field(
+            default=True,
+            description="是否注册 write_novel Action；关闭后仍可保留 novel_generation Service 供其他插件调用。",
         )
         model_name: str = Field(
             default="",
@@ -36,6 +40,18 @@ class NovelWriterConfig(BaseConfig):
             default=3000,
             description="小说生成最大输出 token 数，参考 config/model.toml 的 task max_tokens；过小会导致只输出很短内容。",
         )
+        generation_timeout_seconds: int = Field(
+            default=120,
+            description="单次小说生成尝试的完整超时时间，单位秒；包含请求发送和响应正文读取。",
+        )
+        generation_max_retries: int = Field(
+            default=1,
+            description="小说生成失败或超时后的最大重试次数；0 表示不重试。",
+        )
+        generation_retry_interval_seconds: float = Field(
+            default=1.0,
+            description="小说生成失败或超时后再次重试前等待的秒数。",
+        )
         min_words: int = Field(
             default=1200,
             description="默认要求小说正文至少达到的中文字数；用户明确要求更短篇幅时仍会尊重用户要求。",
@@ -43,6 +59,18 @@ class NovelWriterConfig(BaseConfig):
         min_paragraphs: int = Field(
             default=8,
             description="默认要求小说正文至少包含的自然段数量；用于避免模型只输出一句话。",
+        )
+        managed_chapter_target_chars: int = Field(
+            default=2200,
+            description="供文章管理插件调用时的默认章节目标中文字符数。",
+        )
+        managed_chapter_min_chars: int = Field(
+            default=1800,
+            description="供文章管理插件调用时的默认章节最小中文字符数。",
+        )
+        managed_chapter_max_chars: int = Field(
+            default=3200,
+            description="供文章管理插件调用时的默认章节最大中文字符数。",
         )
         fallback_to_direct_send: bool = Field(
             default=True,

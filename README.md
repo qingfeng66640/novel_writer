@@ -56,6 +56,9 @@ config/plugins/novel_writer/config.toml
 | `model_name` | 自定义模型名称，填写 `config/model.toml` 中 `[[models]].name`；留空时使用 `model_tasks.actor`。 |
 | `temperature` | 小说生成温度，数值越高越发散。 |
 | `max_tokens` | 最大输出 token 数；过小会导致正文很短。 |
+| `generation_timeout_seconds` | 单次小说生成尝试的完整超时时间，包含请求发送和响应正文读取。 |
+| `generation_max_retries` | 小说生成失败或超时后的最大重试次数；0 表示不重试。 |
+| `generation_retry_interval_seconds` | 小说生成失败或超时后再次重试前等待的秒数。 |
 | `min_words` | 默认最低中文字数要求。 |
 | `min_paragraphs` | 默认最低自然段数量要求。 |
 | `fallback_to_direct_send` | 当 `forward_msg` 不可用或发送失败时是否改为直接发送正文；会先提醒刷屏风险。 |

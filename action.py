@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated, Any
 
-from src.app.plugin_system.api import llm_api, service_api
+from src.app.plugin_system.api import service_api
 from src.app.plugin_system.base import BaseAction
-from src.app.plugin_system.types import LLMPayload, ROLE, SystemReminderBucket, Text
-from src.core.config import get_core_config
 from src.kernel.logger import get_logger
 
 from .config import NovelWriterConfig
+from .schemas import NovelGenerationRequest, NovelRuntimeContext
+from .service import NovelGenerationService
 
 logger = get_logger("novel_writer.action")
 
@@ -26,6 +25,7 @@ class WriteNovelAction(BaseAction):
         "生成小说，并打包成合并转发聊天记录发送到当前聊天流。"
     )
     primary_action = False
+    associated_types = ["text"]
     dependencies = []
 
     async def execute(
@@ -45,15 +45,11 @@ class WriteNovelAction(BaseAction):
             f"request_len={len(user_request.strip())}"
         )
         config = self._config()
-        try:
-            novel = await self._generate_novel(user_request.strip(), config)
-        except asyncio.TimeoutError:
-            logger.warning(f"小说生成超时: stream={self.chat_stream.stream_id}")
-            return False, "小说生成超时，请稍后重试"
-        except Exception as exc:
-            logger.error(f"小说生成失败: {exc}", exc_info=True)
-            return False, f"小说生成失败：{exc}"
+        result = await self._generate_novel(user_request.strip(), config)
+        if not result.ok:
+            return False, result.error or "小说生成失败"
 
+        novel = result.body
         if not novel.strip():
             logger.warning(f"小说生成结果为空: stream={self.chat_stream.stream_id}")
             return False, "小说生成结果为空"
@@ -87,89 +83,45 @@ class WriteNovelAction(BaseAction):
         self,
         user_request: str,
         config: NovelWriterConfig,
-    ) -> str:
+    ):
         """调用框架 LLM API 生成小说正文。"""
 
-        model_set = self._get_model_set(config)
-        request = llm_api.create_llm_request(
-            model_set,
-            request_name="novel_writer.write_novel",
-            with_reminder=SystemReminderBucket.ACTOR,
+        service = self._generation_service()
+        return await service.generate_standalone(
+            NovelGenerationRequest(
+                user_request=user_request,
+                runtime_context=self._runtime_context(),
+                request_name="novel_writer.write_novel",
+            )
         )
-        prompt = self._build_prompt(user_request, config)
-        logger.debug(
-            f"发送小说生成 LLM 请求: model_count={len(model_set)}, "
-            f"prompt_len={len(prompt)}, max_tokens={config.writer.max_tokens}"
-        )
-        request.add_payload(LLMPayload(ROLE.USER, [Text(prompt)]))
-        response = await asyncio.wait_for(request.send(stream=False), timeout=120.0)
-        novel = str(await response).strip()
-        logger.debug(f"小说生成 LLM 响应完成: chars={len(novel)}")
-        return novel
 
     def _get_model_set(self, config: NovelWriterConfig):
         """按配置获取模型集，并应用生成参数。"""
 
-        temperature = config.writer.temperature
-        max_tokens = config.writer.max_tokens
-        model_name = config.writer.model_name.strip()
-        if model_name:
-            return llm_api.get_model_set_by_name(
-                model_name,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-        model_set = llm_api.get_model_set_by_task("actor")
-        return [
-            {
-                **entry,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            }
-            for entry in model_set
-        ]
+        return self._generation_service()._get_model_set(config)
 
     def _build_prompt(self, user_request: str, config: NovelWriterConfig) -> str:
         """构建小说生成提示词。"""
 
-        bot_persona, background_story = self._build_persona_from_core_config()
-        background_prompt = config.writer.background_prompt_template.format(
-            background_story=background_story,
-        )
-        return config.writer.novel_prompt_template.format(
-            bot_persona=bot_persona,
-            background_prompt=background_prompt,
-            background_story=background_story,
-            user_request=user_request,
-            min_words=config.writer.min_words,
-            min_paragraphs=config.writer.min_paragraphs,
+        return self._generation_service().build_prompt(
+            user_request,
+            config,
+            self._runtime_context(),
         )
 
     def _build_persona_from_core_config(self) -> tuple[str, str]:
         """通过框架配置入口获取 Bot 人设与背景。"""
 
-        personality = get_core_config().personality
-        alias_names = "、".join(personality.alias_names) or "无"
-        safety_guidelines = "\n".join(
-            f"- {item}" for item in personality.safety_guidelines
+        return self._generation_service().build_persona(self._runtime_context())
+
+    def _runtime_context(self) -> NovelRuntimeContext:
+        """构建生成服务所需的运行时上下文。"""
+
+        return NovelRuntimeContext(
+            bot_nickname=self.chat_stream.bot_nickname or "",
+            stream_name=self.chat_stream.stream_name or "",
+            recent_content=self._get_recent_chat_content(max_messages=6),
         )
-        negative_behaviors = "\n".join(
-            f"- {item}" for item in personality.negative_behaviors
-        )
-        lines = [
-            f"昵称：{personality.nickname}",
-            f"别名：{alias_names}",
-            f"身份：{personality.identity}",
-            f"核心人格：{personality.personality_core}",
-            f"人格侧面：{personality.personality_side}",
-            f"表达风格：{personality.reply_style}",
-            f"安全准则：\n{safety_guidelines}",
-            f"禁止行为：\n{negative_behaviors}",
-        ]
-        runtime_hint = self._build_runtime_persona_hint()
-        if runtime_hint:
-            lines.append(runtime_hint)
-        return "\n".join(lines), personality.background_story
 
     def _build_runtime_persona_hint(self) -> str:
         """构建运行时可从 ChatStream 获取的人设辅助信息。"""
@@ -237,26 +189,9 @@ class WriteNovelAction(BaseAction):
     def _split_text(self, text: str, max_words_per_message: int) -> list[str]:
         """按配置上限拆分文本，优先在自然段之间切分。"""
 
-        limit = max(1, max_words_per_message)
-        paragraphs = [part.strip() for part in text.split("\n\n") if part.strip()]
-        chunks: list[str] = []
-        current = ""
-        for paragraph in paragraphs or [text.strip()]:
-            if len(paragraph) > limit:
-                if current:
-                    chunks.append(current)
-                    current = ""
-                chunks.extend(
-                    paragraph[index : index + limit]
-                    for index in range(0, len(paragraph), limit)
-                )
-                continue
-            candidate = paragraph if not current else f"{current}\n\n{paragraph}"
-            if len(candidate) <= limit:
-                current = candidate
-            else:
-                chunks.append(current)
-                current = paragraph
-        if current:
-            chunks.append(current)
-        return chunks or [text.strip()]
+        return self._generation_service().split_text(text, max_words_per_message)
+
+    def _generation_service(self) -> NovelGenerationService:
+        """创建绑定当前插件实例的生成服务。"""
+
+        return NovelGenerationService(self.plugin)
