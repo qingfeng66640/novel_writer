@@ -14,6 +14,8 @@ forward_msg:service:forward_msg_protocol
 
 ## 基本使用
 
+### Chatter 自动触发
+
 在聊天中直接向 Bot 提出小说创作需求即可，例如：
 
 ```text
@@ -21,6 +23,16 @@ forward_msg:service:forward_msg_protocol
 ```
 
 当默认 chatter 判断用户想让 Bot 写小说、写故事、续写剧情或根据人设创作文学内容时，会调用 `write_novel` Action。
+
+### 管理员命令触发
+
+管理员可以使用 `/novel` 直接生成一篇简短小说：
+
+```text
+/novel 写一篇赛博狐狸在雨夜守护城市的短篇小说
+```
+
+`/novel` 会复用 `write_novel` Action 的生成与发送逻辑；如果未填写要求，会按默认要求生成一篇简短小说。
 
 ## 配置位置
 
@@ -52,7 +64,7 @@ config/plugins/novel_writer/config.toml
 
 如果没有收到小说，请检查日志中的 `novel_writer.action`：
 
-- 是否开始执行 `write_novel`。
+- 是否开始执行 `write_novel` 或 `/novel` 命令。
 - LLM 请求是否超时。
 - 生成正文长度是否为 0。
 - `forward_msg` 服务是否可用。

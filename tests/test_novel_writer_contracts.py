@@ -16,10 +16,15 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from plugins.novel_writer.action import WriteNovelAction  # noqa: E402
+from plugins.novel_writer.command import NovelCommand  # noqa: E402
 from plugins.novel_writer.config import NovelWriterConfig  # noqa: E402
 from plugins.novel_writer.plugin import NovelWriterPlugin  # noqa: E402
 from plugins.novel_writer.schemas import NovelGenerationRequest  # noqa: E402
 from plugins.novel_writer.service import NovelGenerationService  # noqa: E402
+from src.app.plugin_system.api import send_api  # noqa: E402
+from src.kernel.concurrency import get_task_manager  # noqa: E402
+from src.app.plugin_system.types import PermissionLevel  # noqa: E402
+from src.core.models.message import Message  # noqa: E402
 
 PLUGIN_DIR = Path(__file__).resolve().parents[1]
 
@@ -46,6 +51,7 @@ def test_manifest_matches_plugin_contract() -> None:
     component_names = {
         getattr(component, "action_name", None)
         or getattr(component, "service_name", None)
+        or getattr(component, "command_name", None)
         for component in plugin.get_components()
     }
     include_names = {item["component_name"] for item in manifest["include"]}
@@ -53,6 +59,7 @@ def test_manifest_matches_plugin_contract() -> None:
     assert manifest["version"] == NovelWriterPlugin.plugin_version
     assert include_names <= component_names
     assert "novel_generation" in component_names
+    assert "novel" in component_names
     assert manifest["dependencies"]["plugins"] == []
     assert manifest["dependencies"]["components"] == []
     assert manifest["dependencies_required"] is False
@@ -63,6 +70,154 @@ def test_write_novel_action_declares_associated_types() -> None:
     """Action components must explicitly declare supported message types."""
 
     assert WriteNovelAction.validate_associated_types() == ["text"]
+
+
+def test_novel_command_is_admin_only() -> None:
+    """/novel 命令仅允许管理员权限触发。"""
+
+    assert NovelCommand.command_name == "novel"
+    assert NovelCommand.permission_level == PermissionLevel.OPERATOR
+
+
+async def test_novel_command_starts_background_generation(monkeypatch: Any) -> None:
+    """/novel 命令立即返回并把生成放入后台任务。"""
+
+    created: dict[str, Any] = {}
+    feedback: list[tuple[str, str, str | None, str | None]] = []
+
+    def fake_create_task(
+        coro: Any,
+        name: str | None = None,
+        daemon: bool = False,
+        **kwargs: Any,
+    ) -> SimpleNamespace:
+        created["coro"] = coro
+        created["name"] = name
+        created["daemon"] = daemon
+        coro.close()
+        return SimpleNamespace(task_id="task")
+
+    async def fake_send_text(
+        content: str,
+        stream_id: str,
+        platform: str | None = None,
+        reply_to: str | None = None,
+    ) -> bool:
+        feedback.append((content, stream_id, platform, reply_to))
+        return True
+
+    monkeypatch.setattr(get_task_manager(), "create_task", fake_create_task)
+    monkeypatch.setattr(send_api, "send_text", fake_send_text)
+    message = Message(
+        message_id="msg",
+        sender_id="admin",
+        sender_name="管理员",
+        platform="qq",
+        chat_type="group",
+        stream_id="stream",
+    )
+    command = NovelCommand(
+        plugin=NovelWriterPlugin(NovelWriterConfig()),
+        stream_id="stream",
+        message_id="msg",
+        message=message,
+    )
+    assert await command.execute("赛博狐狸") == (True, "小说生成已开始，请稍等。")
+    assert created == {
+        "coro": created["coro"],
+        "name": "novel_writer_command_generation",
+        "daemon": True,
+    }
+    assert feedback == [("小说生成已开始，请稍等。", "stream", "qq", "msg")]
+
+
+async def test_novel_command_background_reuses_write_action(monkeypatch: Any) -> None:
+    """/novel 后台任务复用 write_novel Action 执行生成与发送。"""
+
+    captured: dict[str, Any] = {}
+
+    async def fake_execute(self: WriteNovelAction, user_request: str) -> tuple[bool, str]:
+        captured["stream_id"] = self.chat_stream.stream_id
+        captured["platform"] = self.chat_stream.platform
+        captured["request"] = user_request
+        return True, "ok"
+
+    monkeypatch.setattr(WriteNovelAction, "execute", fake_execute)
+    command = NovelCommand(
+        plugin=NovelWriterPlugin(NovelWriterConfig()),
+        stream_id="stream",
+        message_id="msg",
+        message=Message(message_id="msg", platform="qq", chat_type="group", stream_id="stream"),
+    )
+    await command._run_generation("请写一篇简短的小说。用户要求：赛博狐狸")
+    assert captured == {
+        "stream_id": "stream",
+        "platform": "qq",
+        "request": "请写一篇简短的小说。用户要求：赛博狐狸",
+    }
+
+
+async def test_novel_command_reports_generation_failure(monkeypatch: Any) -> None:
+    """/novel 生成失败时主动反馈失败原因。"""
+
+    feedback: list[str] = []
+
+    async def fake_execute(self: WriteNovelAction, user_request: str) -> tuple[bool, str]:
+        return False, "模型超时"
+
+    async def fake_send_text(
+        content: str,
+        stream_id: str,
+        platform: str | None = None,
+        reply_to: str | None = None,
+    ) -> bool:
+        feedback.append(content)
+        return True
+
+    monkeypatch.setattr(WriteNovelAction, "execute", fake_execute)
+    monkeypatch.setattr(send_api, "send_text", fake_send_text)
+    command = NovelCommand(
+        plugin=NovelWriterPlugin(NovelWriterConfig()),
+        stream_id="stream",
+        message_id="msg",
+        message=Message(message_id="msg", platform="qq", stream_id="stream"),
+    )
+    await command._run_generation("请写一篇简短的小说。用户要求：赛博狐狸")
+    assert feedback == ["小说生成失败：模型超时"]
+
+
+async def test_novel_command_reports_cancellation(monkeypatch: Any) -> None:
+    """/novel 后台任务被取消时主动反馈中断。"""
+
+    feedback: list[str] = []
+
+    async def fake_execute(self: WriteNovelAction, user_request: str) -> tuple[bool, str]:
+        raise asyncio.CancelledError
+
+    async def fake_send_text(
+        content: str,
+        stream_id: str,
+        platform: str | None = None,
+        reply_to: str | None = None,
+    ) -> bool:
+        feedback.append(content)
+        return True
+
+    monkeypatch.setattr(WriteNovelAction, "execute", fake_execute)
+    monkeypatch.setattr(send_api, "send_text", fake_send_text)
+    command = NovelCommand(
+        plugin=NovelWriterPlugin(NovelWriterConfig()),
+        stream_id="stream",
+        message_id="msg",
+        message=Message(message_id="msg", platform="qq", stream_id="stream"),
+    )
+    try:
+        await command._run_generation("请写一篇简短的小说。用户要求：赛博狐狸")
+    except asyncio.CancelledError:
+        pass
+    else:
+        raise AssertionError("命令取消时应继续抛出 CancelledError")
+    assert feedback == ["小说生成已中断。"]
 
 
 def test_config_defaults_use_actor_task() -> None:

@@ -9,7 +9,8 @@ Novel Writer 会在用户要求 Bot 写小说、写故事、续写剧情或根�
 - 可在插件配置中指定 `config/model.toml` 里的模型名称。
 - 支持配置温度、最大输出 token、默认最低字数、最低段落数。
 - 可选配合 `forward_msg` 把长篇正文拆分为多个合并转发节点发送。
-- 可通过配置开关完全禁用 `write_novel` Action。
+- 可通过管理员命令 `/novel` 直接生成一篇简短小说。
+- 可通过配置开关完全禁用 `write_novel` Action 和 `/novel` 命令。
 
 ## 可选功能：合并转发
 
@@ -24,6 +25,8 @@ forward_msg:service:forward_msg_protocol
 `forward_msg` 是可选功能插件，不再作为强依赖阻塞 `novel_writer` 加载。如果未安装、未启用或发送失败，且 `fallback_to_direct_send = true`，插件会先提醒用户“小说内容过多可能导致刷屏”，然后把小说正文拆成多条普通消息直接发送。
 
 ## 触发方式
+
+### Chatter 自动触发
 
 当用户在聊天中表达以下意图时，默认 chatter 可调用本插件：
 
@@ -40,6 +43,16 @@ forward_msg:service:forward_msg_protocol
 @Bot 写一篇你和三月七在星穹列车上的日常小说，温柔一点，篇幅长一些。
 ```
 
+### 管理员命令触发
+
+管理员可以使用 `/novel` 直接生成一篇简短小说：
+
+```text
+/novel 写一篇赛博狐狸在雨夜守护城市的短篇小说
+```
+
+`/novel` 会复用 `write_novel` Action 的生成与发送逻辑；如果未填写要求，会按默认要求生成一篇简短小说。
+
 ## 配置
 
 插件配置会生成在：
@@ -52,7 +65,7 @@ config/plugins/novel_writer/config.toml
 
 | 字段 | 说明 |
 | --- | --- |
-| `enabled` | 是否启用插件；设为 `false` 时不会注册 `write_novel` Action。 |
+| `enabled` | 是否启用插件；设为 `false` 时不会注册生成 Service、`write_novel` Action 和 `/novel` 命令。 |
 | `model_name` | 自定义模型名称，填写 `config/model.toml` 中 `[[models]].name`；留空时使用 `model_tasks.actor`。 |
 | `temperature` | 小说生成温度，数值越高越发散。 |
 | `max_tokens` | 最大输出 token 数；过小会导致正文很短。 |
