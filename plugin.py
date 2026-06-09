@@ -15,7 +15,7 @@ class NovelWriterPlugin(BasePlugin):
 
     plugin_name = "novel_writer"
     plugin_description = "根据 Bot 人设与背景自动创作小说，并通过合并转发消息发送。（我去了我蝶终于能写小说了😭😭😭）"
-    plugin_version = "1.2.0"
+    plugin_version = "1.2.1"
 
     configs = [NovelWriterConfig]
 

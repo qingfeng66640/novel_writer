@@ -36,7 +36,7 @@ class NovelGenerationService(BaseService):
 
     service_name = "novel_generation"
     service_description = "根据 Bot 人设、作品上下文和用户要求生成小说正文。"
-    version = "1.2.0"
+    version = "1.2.1"
 
     async def generate_standalone(
         self,
@@ -506,17 +506,44 @@ class NovelGenerationService(BaseService):
         max_tokens = max_tokens or config.writer.max_tokens
         model_name = config.writer.model_name.strip()
         if model_name:
-            return llm_api.get_model_set_by_name(
+            model_set = llm_api.get_model_set_by_name(
                 model_name,
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
+            return self._apply_generation_model_options(model_set, config, request)
         model_set = llm_api.get_model_set_by_task("actor")
+        return self._apply_generation_model_options(
+            [
+                {
+                    **entry,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                }
+                for entry in model_set
+            ],
+            config,
+            request,
+        )
+
+    def _apply_generation_model_options(
+        self,
+        model_set: list[dict[str, Any]],
+        config: NovelWriterConfig,
+        request: NovelGenerationRequest | None,
+    ) -> list[dict[str, Any]]:
+        """复制模型配置并应用小说生成专用超时和重试策略。"""
+
+        timeout_seconds = self._timeout_seconds(
+            config,
+            request or NovelGenerationRequest(user_request="__model_options__"),
+        )
         return [
             {
                 **entry,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
+                "timeout": timeout_seconds,
+                "max_retry": 0,
+                "retry_interval": 0,
             }
             for entry in model_set
         ]

@@ -541,9 +541,35 @@ def test_get_model_set_uses_actor_task_by_default(monkeypatch: Any) -> None:
     config.writer.max_tokens = 2048
     action = _make_action()
     assert action._get_model_set(config) == [
-        {"name": "actor", "temperature": 0.8, "max_tokens": 2048}
+        {
+            "name": "actor",
+            "temperature": 0.8,
+            "max_tokens": 2048,
+            "timeout": 120.0,
+            "max_retry": 0,
+            "retry_interval": 0,
+        }
     ]
     assert calls == ["actor"]
+
+
+def test_model_set_overrides_timeout_without_mutating_source() -> None:
+    """小说生成专用模型参数不污染全局模型配置。"""
+
+    config = NovelWriterConfig()
+    service = NovelGenerationService(NovelWriterPlugin(config))
+    source = [{"name": "actor", "timeout": 60, "max_retry": 2, "retry_interval": 3}]
+    request = NovelGenerationRequest(user_request="写小说", timeout_seconds=300)
+    result = service._apply_generation_model_options(source, config, request)
+    assert result == [
+        {
+            "name": "actor",
+            "timeout": 300.0,
+            "max_retry": 0,
+            "retry_interval": 0,
+        }
+    ]
+    assert source == [{"name": "actor", "timeout": 60, "max_retry": 2, "retry_interval": 3}]
 
 
 def test_get_model_set_uses_configured_model_name(monkeypatch: Any) -> None:
@@ -570,6 +596,13 @@ def test_get_model_set_uses_configured_model_name(monkeypatch: Any) -> None:
         fake_get_model_set_by_name,
     )
     assert action._get_model_set(config) == [
-        {"name": "custom-model", "temperature": 0.75, "max_tokens": 4096}
+        {
+            "name": "custom-model",
+            "temperature": 0.75,
+            "max_tokens": 4096,
+            "timeout": 120.0,
+            "max_retry": 0,
+            "retry_interval": 0,
+        }
     ]
     assert calls == [("custom-model", 0.75, 4096)]
