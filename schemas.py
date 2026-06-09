@@ -27,6 +27,8 @@ class NovelGenerationRequest:
     target_chars: int | None = None
     min_chars: int | None = None
     max_chars: int | None = None
+    system_requirements: str = ""
+    quality_requirements: str = ""
     timeout_seconds: int | None = None
     max_retries: int | None = None
     retry_interval_seconds: float | None = None
@@ -40,6 +42,7 @@ class QualityReport:
 
     status: str
     issues: list[str] = field(default_factory=list)
+    issue_details: dict[str, int] = field(default_factory=dict)
     char_count: int = 0
 
 

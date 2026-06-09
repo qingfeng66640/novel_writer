@@ -50,7 +50,11 @@ class NovelWriterConfig(BaseConfig):
         )
         generation_retry_interval_seconds: float = Field(
             default=1.0,
-            description="小说生成失败或超时后再次重试前等待的秒数。",
+            description="小说生成失败、超时或质量检查失败后再次重试前等待的秒数。",
+        )
+        retry_on_quality_failure: bool = Field(
+            default=True,
+            description="质量检查失败时是否按 generation_max_retries 自动重试，例如正文过短、空正文、AI 自述或提示词泄漏。",
         )
         min_words: int = Field(
             default=1200,
@@ -98,23 +102,18 @@ class NovelWriterConfig(BaseConfig):
                 "你需要以 Bot 的人设和背景为基础，为用户创作一篇小说。\n\n"
                 "【Bot 人设】\n{bot_persona}\n\n"
                 "【背景知识】\n{background_prompt}\n\n"
-                "【用户要求】\n{user_request}\n\n"
-                "请输出完整小说正文。篇幅要求：\n"
-                "1. 除非用户明确要求极短篇幅，否则正文至少 {min_words} 字、至少 {min_paragraphs} 个自然段；\n"
-                "2. 每段都要推进场景、动作、心理或对话，不要只写一句总结；\n"
-                "3. 保持 Bot 的性格、身份、表达风格和背景一致；\n"
-                "4. 优先满足用户提出的题材、情节、篇幅、风格要求；\n"
-                "5. 不要解释创作过程，不要输出标题以外的元说明；\n"
-                "6. 内容适合被拆分为多条聊天记录发送。"
+                "【项目上下文】\n{project_context}\n\n"
+                "【续写上下文】\n{continuation_context}\n\n"
+                "【用户要求】\n{user_request}"
             ),
             description=(
                 "小说主提示词模板；{bot_persona} 会被替换为 CoreConfig personality 的昵称、别名、"
                 "身份、核心人格、人格侧面、表达风格、安全准则、禁止行为和运行时上下文；"
                 "{background_prompt} 会被替换为 background_prompt_template 渲染结果；"
                 "{background_story} 会被替换为 CoreConfig personality.background_story；"
-                "{user_request} 会被替换为用户本次写作要求；"
-                "{min_words} 会被替换为 writer.min_words；"
-                "{min_paragraphs} 会被替换为 writer.min_paragraphs。"
+                "{project_context} 会被替换为作品或章节项目上下文；"
+                "{continuation_context} 会被替换为续写上下文；"
+                "{user_request} 会被替换为用户本次写作要求。"
             ),
         )
 

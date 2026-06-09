@@ -75,12 +75,15 @@ def test_config_defaults_use_actor_task() -> None:
     assert config.writer.generation_timeout_seconds == 120
     assert config.writer.generation_max_retries == 1
     assert config.writer.generation_retry_interval_seconds == 1.0
+    assert config.writer.retry_on_quality_failure is True
     assert config.writer.min_words == 1200
     assert config.writer.fallback_to_direct_send is True
     assert config.writer.max_words_per_message == 500
     assert "{bot_persona}" in config.writer.novel_prompt_template
     assert "{user_request}" in config.writer.novel_prompt_template
     assert "{background_story}" in config.writer.background_prompt_template
+    assert "【系统生成要求】" not in config.writer.novel_prompt_template
+    assert "【质量要求】" not in config.writer.novel_prompt_template
 
 
 def test_config_field_descriptions_explain_placeholders() -> None:
@@ -96,6 +99,7 @@ def test_config_field_descriptions_explain_placeholders() -> None:
     assert "完整超时时间" in fields["generation_timeout_seconds"].description
     assert "最大重试次数" in fields["generation_max_retries"].description
     assert "重试前等待" in fields["generation_retry_interval_seconds"].description
+    assert "质量检查失败" in fields["retry_on_quality_failure"].description
     assert "至少达到" in fields["min_words"].description
     assert "未检测到 forward_msg" in fields["fallback_to_direct_send"].description
     assert "刷屏" in fields["fallback_to_direct_send"].description
@@ -106,9 +110,9 @@ def test_config_field_descriptions_explain_placeholders() -> None:
     assert "{bot_persona}" in prompt_description
     assert "{background_prompt}" in prompt_description
     assert "{background_story}" in prompt_description
+    assert "{project_context}" in prompt_description
+    assert "{continuation_context}" in prompt_description
     assert "{user_request}" in prompt_description
-    assert "{min_words}" in prompt_description
-    assert "{min_paragraphs}" in prompt_description
     assert "CoreConfig personality" in prompt_description
 
 
@@ -152,6 +156,8 @@ def test_managed_chapter_request_wraps_project_context(monkeypatch: Any) -> None
                 target_chars=2200,
                 min_chars=100,
                 max_chars=3000,
+                system_requirements="只输出正文",
+                quality_requirements="场景必须完整",
                 request_name="article_manager.generate_chapter",
             )
         )
@@ -163,6 +169,10 @@ def test_managed_chapter_request_wraps_project_context(monkeypatch: Any) -> None
     assert managed.request_name == "article_manager.generate_chapter"
     assert managed.min_chars == 100
     assert managed.max_chars == 3000
+    assert managed.project_context == "作品：黑塔"
+    assert managed.continuation_context == "上一章结尾"
+    assert managed.system_requirements == "只输出正文"
+    assert managed.quality_requirements == "场景必须完整"
     assert "作品：黑塔" in managed.user_request
     assert "上一章结尾" in managed.user_request
     assert "第 2 章" in managed.user_request
@@ -211,6 +221,187 @@ def test_generation_retries_timeout_then_returns_clear_error(monkeypatch: Any) -
     assert "2/2" in result.error
 
 
+def test_build_prompt_includes_user_context_layers(monkeypatch: Any) -> None:
+    """用户提示词只承载写作材料和本次要求。"""
+
+    personality = SimpleNamespace(
+        nickname="长夜月",
+        alias_names=[],
+        identity="人类",
+        personality_core="守护者",
+        personality_side="温柔",
+        background_story="背景故事",
+        reply_style="诗意",
+        safety_guidelines=[],
+        negative_behaviors=[],
+    )
+    monkeypatch.setattr(
+        "plugins.novel_writer.service.get_core_config",
+        lambda: SimpleNamespace(personality=personality),
+    )
+    service = NovelGenerationService(NovelWriterPlugin(NovelWriterConfig()))
+    prompt = service.build_prompt(
+        "推进主线",
+        request=NovelGenerationRequest(
+            user_request="推进主线",
+            project_context="作品：黑塔",
+            continuation_context="上一章结尾",
+            system_requirements="只输出正文",
+            quality_requirements="场景必须完整",
+            min_chars=1000,
+            target_chars=1500,
+            max_chars=2200,
+        ),
+    )
+    assert "【项目上下文】\n作品：黑塔" in prompt
+    assert "【续写上下文】\n上一章结尾" in prompt
+    assert "推进主线" in prompt
+    assert "只输出正文" not in prompt
+    assert "场景必须完整" not in prompt
+    assert "正文最少 1000 个中文字符" not in prompt
+
+
+def test_build_system_prompt_contains_writer_protocol() -> None:
+    """系统提示词承载写作专家、段落协议和质量要求。"""
+
+    config = NovelWriterConfig()
+    service = NovelGenerationService(NovelWriterPlugin(config))
+    prompt = service.build_system_prompt(
+        config,
+        NovelGenerationRequest(
+            user_request="推进主线",
+            system_requirements="只输出正文",
+            quality_requirements="场景必须完整",
+            min_chars=1000,
+            target_chars=1500,
+            max_chars=2200,
+        ),
+    )
+    assert "专业小说写作专家" in prompt
+    assert "只输出小说正文" in prompt
+    assert "<paragraph/>" in prompt
+    assert "正文至少达到 1200 字" in prompt
+    assert "正文至少包含 8 个自然段" in prompt
+    assert "正文最少 1000 个中文字符" in prompt
+    assert "正文目标约 1500 个中文字符" in prompt
+    assert "正文最多 2200 个中文字符" in prompt
+    assert "只输出正文" in prompt
+    assert "场景必须完整" in prompt
+
+
+def test_generate_body_adds_system_payload_before_user(monkeypatch: Any) -> None:
+    """LLM 调用使用原生 system payload 承载小说生成协议。"""
+
+    payloads = []
+
+    class FakeResponse:
+        def __await__(self):
+            async def _result():
+                return "正文"
+
+            return _result().__await__()
+
+    class FakeRequest:
+        def add_payload(self, payload, position=None):
+            payloads.append(payload)
+            return self
+
+        async def send(self, *, stream: bool = True):
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "plugins.novel_writer.service.llm_api.create_llm_request",
+        lambda *_args, **_kwargs: FakeRequest(),
+    )
+    service = NovelGenerationService(NovelWriterPlugin(NovelWriterConfig()))
+    monkeypatch.setattr(service, "_get_model_set", lambda *_args, **_kwargs: [])
+    result = __import__("asyncio").run(
+        service._generate_body(
+            "用户提示词",
+            NovelWriterConfig(),
+            NovelGenerationRequest(user_request="写小说"),
+        )
+    )
+    assert result == "正文"
+    assert [payload.role for payload in payloads] == ["system", "user"]
+    assert "专业小说写作专家" in payloads[0].content[0].text
+    assert payloads[1].content[0].text == "用户提示词"
+
+
+def test_generation_retries_quality_failure_then_succeeds(monkeypatch: Any) -> None:
+    """质量检查失败会按配置重试并保留最终成功结果。"""
+
+    config = NovelWriterConfig()
+    config.writer.generation_max_retries = 1
+    config.writer.generation_retry_interval_seconds = 0
+    service = NovelGenerationService(NovelWriterPlugin(config))
+    bodies = ["太短", "这是足够长的小说正文"]
+
+    async def fake_generate_body(*_args: Any, **_kwargs: Any) -> str:
+        return bodies.pop(0)
+
+    monkeypatch.setattr(service, "_generate_body", fake_generate_body)
+    monkeypatch.setattr(service, "build_prompt", lambda *_args, **_kwargs: "prompt")
+    result = __import__("asyncio").run(
+        service.generate(NovelGenerationRequest(user_request="写小说", min_chars=10))
+    )
+    assert result.ok is True
+    assert result.body == "这是足够长的小说正文"
+    assert result.quality_report is not None
+    assert result.quality_report.char_count == len("这是足够长的小说正文")
+
+
+def test_generation_returns_last_quality_failure_report(monkeypatch: Any) -> None:
+    """质量重试耗尽后返回最后一次失败正文和质量报告。"""
+
+    config = NovelWriterConfig()
+    config.writer.generation_max_retries = 1
+    config.writer.generation_retry_interval_seconds = 0
+    service = NovelGenerationService(NovelWriterPlugin(config))
+
+    async def fake_generate_body(*_args: Any, **_kwargs: Any) -> str:
+        return "短"
+
+    monkeypatch.setattr(service, "_generate_body", fake_generate_body)
+    monkeypatch.setattr(service, "build_prompt", lambda *_args, **_kwargs: "prompt")
+    result = __import__("asyncio").run(
+        service.generate(NovelGenerationRequest(user_request="写小说", min_chars=10))
+    )
+    assert result.ok is False
+    assert result.body == "短"
+    assert result.quality_report is not None
+    assert result.quality_report.issues == ["below_min_chars"]
+    assert result.quality_report.issue_details["min_chars"] == 10
+    assert result.quality_report.char_count == 1
+    assert "below_min_chars" in result.error
+
+
+def test_quality_retry_can_be_disabled(monkeypatch: Any) -> None:
+    """关闭质量失败重试时直接返回第一次质量失败。"""
+
+    config = NovelWriterConfig()
+    config.writer.generation_max_retries = 3
+    config.writer.generation_retry_interval_seconds = 0
+    config.writer.retry_on_quality_failure = False
+    service = NovelGenerationService(NovelWriterPlugin(config))
+    attempts = 0
+
+    async def fake_generate_body(*_args: Any, **_kwargs: Any) -> str:
+        nonlocal attempts
+        attempts += 1
+        return "短"
+
+    monkeypatch.setattr(service, "_generate_body", fake_generate_body)
+    monkeypatch.setattr(service, "build_prompt", lambda *_args, **_kwargs: "prompt")
+    result = __import__("asyncio").run(
+        service.generate(NovelGenerationRequest(user_request="写小说", min_chars=10))
+    )
+    assert attempts == 1
+    assert result.ok is False
+    assert result.quality_report is not None
+    assert result.quality_report.issues == ["below_min_chars"]
+
+
 def test_build_prompt_uses_core_personality(monkeypatch: Any) -> None:
     """提示词使用框架 CoreConfig 中的人设字段。"""
 
@@ -234,9 +425,31 @@ def test_build_prompt_uses_core_personality(monkeypatch: Any) -> None:
     assert "长夜月" in prompt
     assert "温柔、极端、孤独的守护者" in prompt
     assert "守望三月七的背景故事" in prompt
-    assert "1200" in prompt
-    assert "8" in prompt
     assert "写一篇短篇小说" in prompt
+
+
+def test_clean_novel_body_removes_numbered_paragraphs() -> None:
+    """清理模型误输出的段首序号。"""
+
+    service = NovelGenerationService(NovelWriterPlugin(NovelWriterConfig()))
+    text = "1. 月光落在车窗上。\n\n二、三月七回头看他。\n\n第三段没有序号。"
+    assert service.clean_novel_body(text) == "月光落在车窗上。三月七回头看他。第三段没有序号。"
+
+
+def test_clean_novel_body_converts_paragraph_markers() -> None:
+    """将内部段落协议转换为用户可见的小说自然段。"""
+
+    service = NovelGenerationService(NovelWriterPlugin(NovelWriterConfig()))
+    text = "第一自然段。<paragraph/>第二自然段。\n\n<paragraph/>第三自然段。"
+    assert service.clean_novel_body(text) == "第一自然段。\n\n第二自然段。\n\n第三自然段。"
+
+
+def test_clean_novel_body_merges_sentence_paragraphs() -> None:
+    """将模型误拆的一句一段整理为小说自然段。"""
+
+    service = NovelGenerationService(NovelWriterPlugin(NovelWriterConfig()))
+    text = "她推开门。\n\n风从走廊尽头吹来。\n\n三月七缩了缩肩。\n\n长夜月没有说话。"
+    assert service.clean_novel_body(text) == "她推开门。风从走廊尽头吹来。三月七缩了缩肩。长夜月没有说话。"
 
 
 def test_action_declares_valid_associated_types() -> None:
