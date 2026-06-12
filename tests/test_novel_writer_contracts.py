@@ -620,8 +620,8 @@ def test_action_description_contains_natural_triggers() -> None:
     description = WriteNovelAction.action_description
     assert "写小说" in description
     assert "写故事" in description
-    assert "编故事" in description
-    assert "创作小说" in description
+    assert "编个故事" in description
+    assert "创作" in description
 
 
 def test_split_text_respects_limit_and_paragraphs() -> None:
@@ -774,7 +774,6 @@ def test_standalone_accepts_dict_request(monkeypatch: Any) -> None:
         return NovelGenerationResult(ok=True, body="正文")
 
     monkeypatch.setattr(service, "generate", fake_generate)
-    import asyncio
     result = asyncio.run(
         service.generate_standalone({"user_request": "写小说", "target_chars": 2000})
     )
@@ -796,7 +795,6 @@ def test_chapter_accepts_dict_request(monkeypatch: Any) -> None:
         return NovelGenerationResult(ok=True, body="章节正文")
 
     monkeypatch.setattr(service, "generate", fake_generate)
-    import asyncio
     result = asyncio.run(
         service.generate_chapter({
             "user_request": "继续推进剧情",
@@ -824,7 +822,6 @@ def test_continue_chapter_accepts_dict_request(monkeypatch: Any) -> None:
         return NovelGenerationResult(ok=True, body="续写正文")
 
     monkeypatch.setattr(service, "generate", fake_generate)
-    import asyncio
     result = asyncio.run(
         service.continue_chapter({
             "user_request": "请续写",

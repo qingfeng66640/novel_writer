@@ -36,7 +36,7 @@ class NovelGenerationService(BaseService):
 
     service_name = "novel_generation"
     service_description = "根据 Bot 人设、作品上下文和用户要求生成小说正文。"
-    version = "1.3.0"
+    version = "1.4.0"
 
     async def generate_standalone(
         self,
