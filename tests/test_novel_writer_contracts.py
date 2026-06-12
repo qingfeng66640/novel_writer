@@ -19,7 +19,7 @@ from plugins.novel_writer.action import WriteNovelAction  # noqa: E402
 from plugins.novel_writer.command import NovelCommand  # noqa: E402
 from plugins.novel_writer.config import NovelWriterConfig  # noqa: E402
 from plugins.novel_writer.plugin import NovelWriterPlugin  # noqa: E402
-from plugins.novel_writer.schemas import NovelGenerationRequest  # noqa: E402
+from plugins.novel_writer.schemas import NovelGenerationRequest, NovelGenerationResult  # noqa: E402
 from plugins.novel_writer.service import NovelGenerationService  # noqa: E402
 from src.app.plugin_system.api import send_api  # noqa: E402
 from src.kernel.concurrency import get_task_manager  # noqa: E402
@@ -761,3 +761,78 @@ def test_get_model_set_uses_configured_model_name(monkeypatch: Any) -> None:
         }
     ]
     assert calls == [("custom-model", 0.75, 4096)]
+
+
+def test_standalone_accepts_dict_request(monkeypatch: Any) -> None:
+    """其他插件可以不 import NovelGenerationRequest，直接传 dict 调用。"""
+
+    captured: dict[str, NovelGenerationRequest] = {}
+    service = NovelGenerationService(NovelWriterPlugin(NovelWriterConfig()))
+
+    async def fake_generate(request: NovelGenerationRequest):
+        captured["request"] = request
+        return NovelGenerationResult(ok=True, body="正文")
+
+    monkeypatch.setattr(service, "generate", fake_generate)
+    import asyncio
+    result = asyncio.run(
+        service.generate_standalone({"user_request": "写小说", "target_chars": 2000})
+    )
+    assert result.ok
+    assert result.body == "正文"
+    assert captured["request"].user_request == "写小说"
+    assert captured["request"].target_chars == 2000
+    assert captured["request"].mode == "standalone"
+
+
+def test_chapter_accepts_dict_request(monkeypatch: Any) -> None:
+    """章节生成接口可接受 dict 形式的请求。"""
+
+    captured: dict[str, NovelGenerationRequest] = {}
+    service = NovelGenerationService(NovelWriterPlugin(NovelWriterConfig()))
+
+    async def fake_generate(request: NovelGenerationRequest):
+        captured["request"] = request
+        return NovelGenerationResult(ok=True, body="章节正文")
+
+    monkeypatch.setattr(service, "generate", fake_generate)
+    import asyncio
+    result = asyncio.run(
+        service.generate_chapter({
+            "user_request": "继续推进剧情",
+            "project_context": "科幻小说",
+            "continuation_context": "上一章结尾",
+            "chapter_number": 3,
+            "chapter_title": "新的开始",
+            "target_chars": 1500,
+        })
+    )
+    assert result.ok
+    assert captured["request"].user_request is not None
+    assert captured["request"].mode == "chapter"
+    assert captured["request"].project_context == "科幻小说"
+
+
+def test_continue_chapter_accepts_dict_request(monkeypatch: Any) -> None:
+    """续写章节接口可接受 dict 形式的请求。"""
+
+    captured: dict[str, NovelGenerationRequest] = {}
+    service = NovelGenerationService(NovelWriterPlugin(NovelWriterConfig()))
+
+    async def fake_generate(request: NovelGenerationRequest):
+        captured["request"] = request
+        return NovelGenerationResult(ok=True, body="续写正文")
+
+    monkeypatch.setattr(service, "generate", fake_generate)
+    import asyncio
+    result = asyncio.run(
+        service.continue_chapter({
+            "user_request": "请续写",
+            "project_context": "仙侠小说",
+            "continuation_context": "主角醒来发现",
+        })
+    )
+    assert result.ok
+    assert captured["request"].user_request is not None
+    assert captured["request"].project_context == "仙侠小说"
+    assert captured["request"].continuation_context == "主角醒来发现"

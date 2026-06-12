@@ -36,22 +36,26 @@ class NovelGenerationService(BaseService):
 
     service_name = "novel_generation"
     service_description = "根据 Bot 人设、作品上下文和用户要求生成小说正文。"
-    version = "1.2.2"
+    version = "1.3.0"
 
     async def generate_standalone(
         self,
-        request: NovelGenerationRequest,
+        request: NovelGenerationRequest | dict[str, Any],
     ) -> NovelGenerationResult:
         """生成独立小说正文。"""
 
+        if isinstance(request, dict):
+            request = NovelGenerationRequest(**request)
         return await self.generate(request)
 
     async def generate_chapter(
         self,
-        request: NovelGenerationRequest,
+        request: NovelGenerationRequest | dict[str, Any],
     ) -> NovelGenerationResult:
         """生成文章管理场景下的章节正文。"""
 
+        if isinstance(request, dict):
+            request = NovelGenerationRequest(**request)
         managed_request = NovelGenerationRequest(
             user_request=build_managed_chapter_instruction(
                 user_request=request.user_request,
@@ -79,10 +83,12 @@ class NovelGenerationService(BaseService):
 
     async def continue_chapter(
         self,
-        request: NovelGenerationRequest,
+        request: NovelGenerationRequest | dict[str, Any],
     ) -> NovelGenerationResult:
         """基于已有作品上下文续写章节。"""
 
+        if isinstance(request, dict):
+            request = NovelGenerationRequest(**request)
         continuation = request.continuation_context or "请自然承接上一章继续推进剧情。"
         return await self.generate_chapter(
             NovelGenerationRequest(
